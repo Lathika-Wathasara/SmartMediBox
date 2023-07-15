@@ -1,0 +1,87 @@
+#include <PubSubClient.h>
+#include <WiFi.h>
+#include "DHTesp.h"
+
+const int DHT_PIN = 15;
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+DHTesp dhtSensor;
+
+char tempAr[6];
+char humAr[6];
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  setupWiFi();
+  setupMQTT();
+  dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  if (!mqttClient.connected()) {
+    ConnectToBroker();
+  }
+  mqttClient.loop(); // All the messages checkings and publishes are done inside this
+
+  // MQTT publish temp and hummidity
+  updateTempAndHum();
+  Serial.println("Temp:- " + String(tempAr));
+  Serial.println("Humidity:- " + String(humAr));
+  mqttClient.publish("lw-temp", tempAr);
+  mqttClient.publish("lw-hum", humAr);
+  delay(1000);
+}
+
+// Seting up the WiFi
+void setupWiFi() {
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    Serial.print(1 + i);
+    Serial.println(". SSID:- ");
+    Serial.print(WiFi.SSID(i));
+    Serial.println(" RSSI:- ");
+    Serial.print(WiFi.RSSI(i));
+  }
+
+  WiFi.begin("Wokwi-GUEST", ""); //Put your wifi credentials or the best way is to use an Access Point and WiFiManager
+
+  while (WiFi.status() !=  WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+// setting up the MQTT
+void setupMQTT() {
+  mqttClient.setServer("test.mosquitto.org", 1883); //  https://test.mosquitto.org/
+}
+
+// function to connect to the broker
+void ConnectToBroker() {
+  while (!mqttClient.connected()) {
+    Serial.println("Waiting for the MQTT connection...");
+    if (mqttClient.connect("ESP-32-XXX...")) // If we are checking the authentication (1884 instead of 1883)
+      // we have to put an id. If we are not using authentication, we just have to put a random string.
+    {
+      Serial.println("connected");
+    } else {
+      Serial.println("Failed");
+      Serial.print(mqttClient.state());
+      delay(5000);
+    }
+  }
+}
+
+// updating Temperature and humidity
+void updateTempAndHum() {
+  TempAndHumidity data = dhtSensor.getTempAndHumidity();
+  String(data.temperature, 2).toCharArray(tempAr, 6);
+  String(data.humidity, 2).toCharArray(humAr, 6);
+}
