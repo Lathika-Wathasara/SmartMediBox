@@ -1,8 +1,13 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include "DHTesp.h"
+#include <Servo.h>
 
 const int DHT_PIN = 15;
+const int LDR_PIN = 34; //LDR connected to ADC 34
+const int Servo_PIN = 4;  // servo connected to pwm pin 4
+
+Servo servo;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -10,13 +15,15 @@ DHTesp dhtSensor;
 
 char tempAr[6];
 char humAr[6];
+char ldrAr[6];
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   setupWiFi();
   setupMQTT();
-  dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
+  dhtSensor.setup(DHT_PIN, DHTesp::DHT22); // seting up the sensor
+  servo.attach(Servo_PIN);  // Attaches the servo on PIN 4
 }
 
 void loop() {
@@ -28,10 +35,14 @@ void loop() {
 
   // MQTT publish temp and hummidity
   updateTempAndHum();
-  Serial.println("Temp:- " + String(tempAr));
-  Serial.println("Humidity:- " + String(humAr));
   mqttClient.publish("lw-temp", tempAr);
   mqttClient.publish("lw-hum", humAr);
+
+  // MQTT to publish LDR value
+  updateLDR();
+  mqttClient.publish("lw-ldr", ldrAr);
+
+
   delay(1000);
 }
 
@@ -61,6 +72,9 @@ void setupWiFi() {
 // setting up the MQTT
 void setupMQTT() {
   mqttClient.setServer("test.mosquitto.org", 1883); //  https://test.mosquitto.org/
+  mqttClient.setCallback(GetCallBack);  // When ever a msg is recieved, this function inside the brackets,
+                                        // "GetCallBack" will be call. 
+                                        // We need to write that function according to our expectations
 }
 
 // function to connect to the broker
@@ -71,6 +85,7 @@ void ConnectToBroker() {
       // we have to put an id. If we are not using authentication, we just have to put a random string.
     {
       Serial.println("connected");
+      mqttClient.subscribe("lw-servo"); // Need to give the topics of the subscribing fields here
     } else {
       Serial.println("Failed");
       Serial.print(mqttClient.state());
@@ -84,4 +99,37 @@ void updateTempAndHum() {
   TempAndHumidity data = dhtSensor.getTempAndHumidity();
   String(data.temperature, 2).toCharArray(tempAr, 6);
   String(data.humidity, 2).toCharArray(humAr, 6);
+  Serial.println("Temp:- " + String(tempAr));
+  Serial.println("Humidity:- " + String(humAr));
 }
+
+// updating the LDR value
+void updateLDR(){
+  float ldrval = (float)analogRead(LDR_PIN)/4095.0;
+  String(ldrval, 3).toCharArray(ldrAr, 6);
+  Serial.println("LDR Value: "+ String(ldrAr));
+  }
+
+// writing a function to proccess the recieved subscribed data
+void GetCallBack(char* topic, byte* payload, unsigned int length){
+  Serial.print("Message recieved [");
+  Serial.print(topic);
+  Serial.print("]");
+
+  char payloadCharArr[length];
+  for(int i =0; i< length; i++){
+    Serial.print((char)payload[i]);
+    payloadCharArr[i] = (char)payload[i];
+    }
+    Serial.print("\n");
+
+    ServoControl(topic,payloadCharArr );  // function to control servo motor
+  }
+
+ // Controling function for servo
+ void ServoControl(char* topic, char payloadCharArr[] ){
+  if (strcmp(topic, "lw-servo")==0){
+    int servo_ang = atoi(payloadCharArr); // value in between 0 - 180
+    servo.write(servo_ang);
+    }
+  } 
